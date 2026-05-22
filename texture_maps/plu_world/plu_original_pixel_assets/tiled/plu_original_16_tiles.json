@@ -1,0 +1,162 @@
+{
+  "tilewidth": 16,
+  "tileheight": 16,
+  "columns": 8,
+  "tiles": [
+    {
+      "id": 0,
+      "name": "grass_meadow",
+      "file": "tiles_16/grass_meadow.png"
+    },
+    {
+      "id": 1,
+      "name": "grass_flower",
+      "file": "tiles_16/grass_flower.png"
+    },
+    {
+      "id": 2,
+      "name": "water_blue",
+      "file": "tiles_16/water_blue.png"
+    },
+    {
+      "id": 3,
+      "name": "stone_plaza",
+      "file": "tiles_16/stone_plaza.png"
+    },
+    {
+      "id": 4,
+      "name": "stone_plaza_cracked",
+      "file": "tiles_16/stone_plaza_cracked.png"
+    },
+    {
+      "id": 5,
+      "name": "asphalt",
+      "file": "tiles_16/asphalt.png"
+    },
+    {
+      "id": 6,
+      "name": "concrete_walk",
+      "file": "tiles_16/concrete_walk.png"
+    },
+    {
+      "id": 7,
+      "name": "red_roof_ridge",
+      "file": "tiles_16/red_roof_ridge.png"
+    },
+    {
+      "id": 8,
+      "name": "red_roof_side",
+      "file": "tiles_16/red_roof_side.png"
+    },
+    {
+      "id": 9,
+      "name": "green_roof",
+      "file": "tiles_16/green_roof.png"
+    },
+    {
+      "id": 10,
+      "name": "cream_wall",
+      "file": "tiles_16/cream_wall.png"
+    },
+    {
+      "id": 11,
+      "name": "brick_wall",
+      "file": "tiles_16/brick_wall.png"
+    },
+    {
+      "id": 12,
+      "name": "window_arch_black",
+      "file": "tiles_16/window_arch_black.png"
+    },
+    {
+      "id": 13,
+      "name": "window_blue_arch",
+      "file": "tiles_16/window_blue_arch.png"
+    },
+    {
+      "id": 14,
+      "name": "door_dark",
+      "file": "tiles_16/door_dark.png"
+    },
+    {
+      "id": 15,
+      "name": "columns",
+      "file": "tiles_16/columns.png"
+    },
+    {
+      "id": 16,
+      "name": "stairs_down",
+      "file": "tiles_16/stairs_down.png"
+    },
+    {
+      "id": 17,
+      "name": "crosswalk",
+      "file": "tiles_16/crosswalk.png"
+    },
+    {
+      "id": 18,
+      "name": "parking_line",
+      "file": "tiles_16/parking_line.png"
+    },
+    {
+      "id": 19,
+      "name": "sports_turf",
+      "file": "tiles_16/sports_turf.png"
+    },
+    {
+      "id": 20,
+      "name": "track_clay",
+      "file": "tiles_16/track_clay.png"
+    },
+    {
+      "id": 21,
+      "name": "fence_ns",
+      "file": "tiles_16/fence_ns.png"
+    },
+    {
+      "id": 22,
+      "name": "fence_ew",
+      "file": "tiles_16/fence_ew.png"
+    },
+    {
+      "id": 23,
+      "name": "curb_edge",
+      "file": "tiles_16/curb_edge.png"
+    },
+    {
+      "id": 24,
+      "name": "ornate_floor_medallion",
+      "file": "tiles_16/ornate_floor_medallion.png"
+    },
+    {
+      "id": 25,
+      "name": "banner_floor_blue",
+      "file": "tiles_16/banner_floor_blue.png"
+    },
+    {
+      "id": 26,
+      "name": "banner_floor_green",
+      "file": "tiles_16/banner_floor_green.png"
+    },
+    {
+      "id": 27,
+      "name": "roof_corner_ne",
+      "file": "tiles_16/roof_corner_ne.png"
+    },
+    {
+      "id": 28,
+      "name": "roof_corner_nw",
+      "file": "tiles_16/roof_corner_nw.png"
+    },
+    {
+      "id": 29,
+      "name": "shadow_arch",
+      "file": "tiles_16/shadow_arch.png"
+    },
+    {
+      "id": 30,
+      "name": "hedge",
+      "file": "tiles_16/hedge.png"
+    }
+  ]
+}

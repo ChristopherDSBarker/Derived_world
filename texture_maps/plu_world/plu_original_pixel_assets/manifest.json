@@ -1,0 +1,116 @@
+{
+  "project": "PLU OSM Original Pixel Asset Pack",
+  "style": "original warm ornate campus pixel art; screenshot used only as broad visual inspiration; no copied copyrighted sprites/layouts",
+  "constraints": {
+    "no_antialiasing": true,
+    "no_dithering": true,
+    "palette_colors": 30,
+    "base_tile_resolution": "16x16 and 32x32"
+  },
+  "palette": {
+    "ink": "#3a2a20",
+    "shadow": "#5d3722",
+    "roof_dark": "#913618",
+    "roof": "#cf5216",
+    "roof_hi": "#f48b2d",
+    "roof_light": "#ffb94d",
+    "olive_dark": "#606826",
+    "olive": "#91932d",
+    "olive_hi": "#ccb946",
+    "stone_dark": "#a46839",
+    "stone": "#daa452",
+    "stone_hi": "#fedc84",
+    "plaster": "#ffe1ae",
+    "cream": "#fff1cb",
+    "white": "#ffffea",
+    "blue_dark": "#225c8c",
+    "blue": "#2ea1c5",
+    "blue_hi": "#6cdfe1",
+    "grass_dark": "#34743a",
+    "grass": "#50a34c",
+    "grass_hi": "#84c75c",
+    "pavement_dark": "#666053",
+    "pavement": "#8e846e",
+    "pavement_hi": "#beb188",
+    "black": "#181412",
+    "banner_blue": "#3264ab",
+    "banner_green": "#628851",
+    "brick_red": "#ab3c23",
+    "wood": "#b26f2d",
+    "gold": "#eebc39"
+  },
+  "tag_to_asset": {
+    "building=*": [
+      "cream_wall",
+      "brick_wall",
+      "window_arch_black",
+      "door_dark",
+      "roof_terracotta_large",
+      "roof_olive_large",
+      "arched_wall_three_windows",
+      "ornate_facade_center",
+      "campus_tower_original"
+    ],
+    "highway=footway": [
+      "stone_plaza",
+      "concrete_walk",
+      "curb_edge"
+    ],
+    "highway=service": [
+      "asphalt",
+      "parking_line",
+      "crosswalk"
+    ],
+    "footway=crossing": [
+      "crosswalk",
+      "crossing_sign"
+    ],
+    "amenity=parking": [
+      "asphalt",
+      "parking_line",
+      "parking_icon"
+    ],
+    "leisure=pitch": [
+      "sports_turf",
+      "track_clay"
+    ],
+    "water": [
+      "water_blue",
+      "water_mosaic_pool",
+      "circular_mosaic_window"
+    ],
+    "barrier=fence": [
+      "fence_ns",
+      "fence_ew",
+      "gate_arch"
+    ],
+    "steps=*": [
+      "stairs_down",
+      "grand_stairs"
+    ],
+    "landuse=grass": [
+      "grass_meadow",
+      "grass_flower",
+      "hedge",
+      "tree_round",
+      "shrub_planter"
+    ],
+    "campus ornament": [
+      "ornate_floor_medallion",
+      "banner_floor_blue",
+      "banner_floor_green",
+      "banner_pair",
+      "lamp_post",
+      "bench",
+      "bike_parking",
+      "hydrant_orange"
+    ]
+  },
+  "counts": {
+    "tiles_16": 31,
+    "tiles_32": 8,
+    "objects_32": 9,
+    "objects_48": 3,
+    "ui": 2
+  }
+}
