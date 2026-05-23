@@ -28,6 +28,9 @@ http://localhost:8000
 - `A` move left
 - `S` move down
 - `D` move right
+- `-` zoom camera out
+- `=` / `+` zoom camera in
+- `M` show or hide the minimap
 
 Arrow keys do nothing.
 
@@ -36,7 +39,8 @@ Arrow keys do nothing.
 - Static local map data from `mapData.js`
 - Canvas-rendered roads, paths, buildings, parks, water, and landmarks
 - WASD-only player movement
-- Camera follows the player
+- Camera follows the player with an RPG-style zoom
+- Fixed top-right minimap with player and viewport
 - Buildings block movement
 - Water blocks movement
 

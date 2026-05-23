@@ -35,7 +35,7 @@ declare(strict_types=1);
         </div>
         <div>
           <span>Move</span>
-          <strong>WASD</strong>
+          <strong>WASD | +/- zoom | M map</strong>
         </div>
       </div>
     </header>

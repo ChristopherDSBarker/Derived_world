@@ -17,17 +17,29 @@
   };
 
   const DEBUG_BUILDINGS = false;
+  const DEBUG_OSM = true;
   const DEBUG_LABELS = true;
   const DEBUG_DOORS = false;
   const DEBUG_ENTRANCES = false;
   const PLAYER_COLLISION_RADIUS = 8;
-  const BUILDING_WALL_DEPTH = 18;
-  const BUILDING_SHADOW_DEPTH = 6;
+  const BUILDING_WALL_DEPTH = 16;
+  const BUILDING_SHADOW_DEPTH = 5;
   const BUILDING_ROOF_STRIPE_SPACING = 8;
-  const DOOR_WIDTH = 10;
-  const DOOR_HEIGHT = 14;
+  const DOOR_WIDTH = 11;
+  const DOOR_HEIGHT = 22;
   const WINDOW_WIDTH = 6;
   const WINDOW_HEIGHT = 5;
+  const CAMERA_ZOOM = 1.32;
+  const MIN_CAMERA_ZOOM = 0.95;
+  const MAX_CAMERA_ZOOM = 2.1;
+  const CAMERA_ZOOM_STEP = 0.1;
+  const CAMERA_LERP = 0.12;
+  const ROAD_VISUAL_SCALE = 0.82;
+  const PATH_VISUAL_SCALE = 0.88;
+  const PLAYER_RENDER_LERP = 0.22;
+  const MINIMAP_WIDTH = 180;
+  const MINIMAP_HEIGHT = 130;
+  const MINIMAP_PADDING = 10;
   const EXPECTED_SOURCE = "map_data/plu_map-true.osm";
   const keys = new Set();
 
@@ -35,22 +47,27 @@
   let mapBounds = null;
   let collisionPolygons = [];
   let cameraClampLogged = false;
+  let showMinimap = true;
 
   const player = {
     x: 0,
     y: 0,
-    w: 16,
-    h: 20,
+    visualX: 0,
+    visualY: 0,
+    w: 13,
+    h: 17,
     speed: 180,
-    color: "#f4ead0"
+    color: "#f4ead0",
+    isMoving: false
   };
 
   const camera = {
     x: 0,
     y: 0,
-    zoom: 1
+    zoom: CAMERA_ZOOM
   };
 
+  let elapsedTime = 0;
   setupInput();
   initialize();
 
@@ -70,27 +87,17 @@
       ...map.water.map(collisionPolygonForFeature)
     ];
 
-    console.log("[OSM Walking QA] active map source filename:", map.sourceFile);
-    console.log("[OSM Walking QA] active map summary:", {
-      world: map.world,
-      roads: map.roads.length,
-      paths: map.paths.length,
-      buildings: map.buildings.length,
-      parks: map.parks.length,
-      water: map.water.length,
-      landmarks: map.landmarks.length,
-      namedBuildings: map.stats.namedBuildings,
-      realEntranceNodes: map.stats.realEntranceNodes,
-      attachedEntranceNodes: map.stats.attachedEntranceNodes,
-      generatedFallbackDoors: map.stats.generatedFallbackDoors
-    });
-    console.log("[OSM Walking QA] building/door QA:", map.stats);
+    player.visualX = player.x;
+    player.visualY = player.y;
+    updateCamera(true);
+
+    logOsmQaReport(map);
     if (map.stats.realEntranceNodes === 0) {
       console.info("[OSM Walking QA] No real OSM entrance nodes found; doors are generated fallback.");
     }
 
     setText(ui.source, map.sourceFile);
-    setText(ui.stats, `named ${map.stats.namedBuildings} | entrances ${map.stats.realEntranceNodes} | fallback doors ${map.stats.generatedFallbackDoors}`);
+    setText(ui.stats, `buildings ${map.stats.buildingCount} | named ${map.stats.namedBuildings} | unnamed ${map.stats.unnamedBuildings}`);
     requestAnimationFrame(loop);
   }
 
@@ -124,8 +131,8 @@
     };
     const sourceFile = gameMap.meta?.sourceFile || "data/generated/gameMap.json";
 
-    const roads = (gameMap.roads || []).map((feature) => routeFromGenerated(feature, 34)).filter(Boolean);
-    const paths = (gameMap.paths || []).map((feature) => routeFromGenerated(feature, 18)).filter(Boolean);
+    const roads = (gameMap.roads || []).map((feature) => routeFromGenerated(feature, 34 * ROAD_VISUAL_SCALE, ROAD_VISUAL_SCALE)).filter(Boolean);
+    const paths = (gameMap.paths || []).map((feature) => routeFromGenerated(feature, 18 * PATH_VISUAL_SCALE, PATH_VISUAL_SCALE)).filter(Boolean);
     const buildings = (gameMap.buildings || []).map(featureFromGenerated).filter(Boolean);
     const parks = [...(gameMap.parks || []), ...(gameMap.forests || [])].map(featureFromGenerated).filter(Boolean);
     const water = (gameMap.water || []).map(featureFromGenerated).filter(Boolean);
@@ -155,9 +162,11 @@
       stats: {
         buildingCount: buildings.length,
         namedBuildings: buildings.filter((building) => building.label).length,
+        unnamedBuildings: buildings.filter((building) => !building.label).length,
         realEntranceNodes: realEntrances.length,
         attachedEntranceNodes: doorStats.attachedEntranceNodes,
-        generatedFallbackDoors: doorStats.generatedFallbackDoors
+        generatedFallbackDoors: doorStats.generatedFallbackDoors,
+        namedBuildingDetails: namedBuildingDetails(buildings)
       }
     };
   }
@@ -174,9 +183,11 @@
       stats: {
         buildingCount: staticMap.buildings?.length || 0,
         namedBuildings: (staticMap.buildings || []).filter((building) => labelForFeature(building)).length,
+        unnamedBuildings: (staticMap.buildings || []).filter((building) => !labelForFeature(building)).length,
         realEntranceNodes: 0,
         attachedEntranceNodes: 0,
-        generatedFallbackDoors: 0
+        generatedFallbackDoors: 0,
+        namedBuildingDetails: []
       }
     };
   }
@@ -211,7 +222,7 @@
     return candidate;
   }
 
-  function routeFromGenerated(feature, fallbackWidth) {
+  function routeFromGenerated(feature, fallbackWidth, visualScale = 1) {
     const points = (feature.coordinates || [])
       .map((point) => ({ x: Number(point.x), y: Number(point.y) }))
       .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
@@ -223,7 +234,7 @@
       name: feature.name,
       type: feature.type,
       tags: feature.tags || {},
-      width: feature.tags?.highway === "pedestrian" ? Math.max(fallbackWidth, 26) : fallbackWidth,
+      width: feature.tags?.highway === "pedestrian" ? Math.max(fallbackWidth, 26 * visualScale) : fallbackWidth,
       points
     };
   }
@@ -322,6 +333,47 @@
     };
   }
 
+  function logOsmQaReport(activeMap) {
+    if (!DEBUG_OSM) return;
+
+    const sourceMatchesExpected = activeMap.sourceFile === EXPECTED_SOURCE;
+    console.log("[OSM QA] active OSM source:", {
+      sourceFile: activeMap.sourceFile,
+      expectedSource: EXPECTED_SOURCE,
+      sourceMatchesExpected
+    });
+    console.log("[OSM QA] map layer counts:", {
+      buildings: activeMap.stats.buildingCount,
+      namedBuildings: activeMap.stats.namedBuildings,
+      unnamedBuildings: activeMap.stats.unnamedBuildings,
+      roads: activeMap.roads.length,
+      paths: activeMap.paths.length,
+      parks: activeMap.parks.length,
+      water: activeMap.water.length,
+      landmarks: activeMap.landmarks.length,
+      realEntranceNodes: activeMap.stats.realEntranceNodes,
+      attachedEntranceNodes: activeMap.stats.attachedEntranceNodes,
+      generatedFallbackDoors: activeMap.stats.generatedFallbackDoors
+    });
+    console.table(activeMap.stats.namedBuildingDetails);
+  }
+
+  function namedBuildingDetails(buildings) {
+    return buildings
+      .filter((building) => building.label)
+      .map((building) => {
+        const center = centerOfBounds(boundsForFeature(building));
+        return {
+          id: building.id,
+          name: building.label,
+          centerX: Math.round(center.x),
+          centerY: Math.round(center.y),
+          realEntrancesAttached: building.realEntrances.length,
+          fallbackDoorUsed: building.useFallbackDoor ? "yes" : "no"
+        };
+      });
+  }
+
   function isEntranceFeature(feature) {
     const tags = feature.tags || {};
     return feature.type === "entrance" || Boolean(tags.entrance || tags.door || tags.building === "entrance");
@@ -357,8 +409,9 @@
     const buildingTag = String(tags.building || "");
     const isImportant = Boolean(building.label) ||
       /university|school|college|public|commercial|retail|civic|residential|dormitory|apartments/i.test(buildingTag);
+    const isLargeEnoughToMatter = area >= 12000 && bounds.w >= 70 && bounds.h >= 45;
 
-    return isImportant || area >= 9000 || (bounds.w >= 72 && bounds.h >= 48);
+    return isImportant || isLargeEnoughToMatter;
   }
 
   function fallbackDoorTForFacade(facade, routes) {
@@ -388,6 +441,24 @@
       if (["w", "a", "s", "d"].includes(key)) {
         keys.add(key);
         event.preventDefault();
+        return;
+      }
+
+      if (key === "m" && !event.repeat) {
+        showMinimap = !showMinimap;
+        event.preventDefault();
+        return;
+      }
+
+      if ((event.key === "-" || event.key === "_") && !event.repeat) {
+        setCameraZoom(camera.zoom - CAMERA_ZOOM_STEP);
+        event.preventDefault();
+        return;
+      }
+
+      if ((event.key === "=" || event.key === "+") && !event.repeat) {
+        setCameraZoom(camera.zoom + CAMERA_ZOOM_STEP);
+        event.preventDefault();
       }
     });
 
@@ -405,6 +476,7 @@
   function loop(timestamp) {
     const dt = Math.min((timestamp - lastFrame) / 1000 || 0, 0.033);
     lastFrame = timestamp;
+    elapsedTime += dt;
 
     update(dt);
     draw();
@@ -421,6 +493,8 @@
     if (keys.has("w")) dy -= 1;
     if (keys.has("s")) dy += 1;
 
+    player.isMoving = dx !== 0 || dy !== 0;
+
     if (dx !== 0 || dy !== 0) {
       const length = Math.hypot(dx, dy);
       dx /= length;
@@ -431,30 +505,59 @@
       movePlayer(0, dy * step);
     }
 
+    updatePlayerVisual();
     updateCamera();
     updateHud();
   }
 
-  function updateCamera() {
-    camera.x = player.x - canvas.width / 2;
-    camera.y = player.y - canvas.height / 2;
+  function updatePlayerVisual() {
+    player.visualX += (player.x - player.visualX) * PLAYER_RENDER_LERP;
+    player.visualY += (player.y - player.visualY) * PLAYER_RENDER_LERP;
+  }
 
-    if (mapBounds) {
-      camera.x = Math.max(mapBounds.minX, Math.min(camera.x, mapBounds.maxX - canvas.width));
-      camera.y = Math.max(mapBounds.minY, Math.min(camera.y, mapBounds.maxY - canvas.height));
+  function updateCamera(snap = false) {
+    const target = clampedCameraTarget(
+      player.x - visibleWorldWidth() / 2,
+      player.y - visibleWorldHeight() / 2
+    );
+
+    if (snap) {
+      camera.x = target.x;
+      camera.y = target.y;
+    } else {
+      camera.x += (target.x - camera.x) * CAMERA_LERP;
+      camera.y += (target.y - camera.y) * CAMERA_LERP;
+      const clamped = clampedCameraTarget(camera.x, camera.y);
+      camera.x = clamped.x;
+      camera.y = clamped.y;
     }
 
-    camera.x = Math.max(0, camera.x);
-    camera.y = Math.max(0, camera.y);
-
-    if (!cameraClampLogged && camera.y === 0 && player.y < canvas.height / 2) {
+    if (!cameraClampLogged && camera.y === 0 && player.y < visibleWorldHeight() / 2) {
       console.log("[OSM Walking QA] camera y is clamped to 0 because the player is near the northern map edge.", {
         playerY: Math.round(player.y),
         cameraY: Math.round(camera.y),
-        canvasHalfHeight: Math.round(canvas.height / 2)
+        visibleHalfHeight: Math.round(visibleWorldHeight() / 2),
+        zoom: camera.zoom.toFixed(2)
       });
       cameraClampLogged = true;
     }
+  }
+
+  function clampedCameraTarget(targetX, targetY) {
+    let x = targetX;
+    let y = targetY;
+
+    if (mapBounds) {
+      const maxCameraX = Math.max(mapBounds.minX, mapBounds.maxX - visibleWorldWidth());
+      const maxCameraY = Math.max(mapBounds.minY, mapBounds.maxY - visibleWorldHeight());
+      x = clamp(x, mapBounds.minX, maxCameraX);
+      y = clamp(y, mapBounds.minY, maxCameraY);
+    }
+
+    return {
+      x: Math.max(0, x),
+      y: Math.max(0, y)
+    };
   }
 
   function worldToScreen(x, y) {
@@ -464,9 +567,31 @@
     };
   }
 
+  function visibleWorldWidth() {
+    return canvas.width / camera.zoom;
+  }
+
+  function visibleWorldHeight() {
+    return canvas.height / camera.zoom;
+  }
+
+  function worldSize(value) {
+    return value * camera.zoom;
+  }
+
   function updateHud() {
     setText(ui.position, `player ${Math.round(player.x)}, ${Math.round(player.y)}`);
-    setText(ui.camera, `camera ${Math.round(camera.x)}, ${Math.round(camera.y)}`);
+    setText(
+      ui.camera,
+      `camera ${Math.round(camera.x)}, ${Math.round(camera.y)} | zoom ${camera.zoom.toFixed(2)} | buildings ${map.stats.buildingCount} | entrances ${map.stats.realEntranceNodes} | fallback ${map.stats.generatedFallbackDoors}`
+    );
+  }
+
+  function setCameraZoom(nextZoom) {
+    camera.zoom = clamp(Number(nextZoom) || CAMERA_ZOOM, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+    cameraClampLogged = false;
+    updateCamera(true);
+    updateHud();
   }
 
   function movePlayer(dx, dy) {
@@ -509,6 +634,7 @@
       map.landmarks.forEach(drawLandmark);
     }
     drawPlayer();
+    drawMinimap();
   }
 
   function drawBackground() {
@@ -533,29 +659,95 @@
   }
 
   function drawRoad(road) {
-    drawPolyline(road.points, road.width + 8, "#2b3335");
-    drawPolyline(road.points, road.width, "#4a5355");
-    drawPolyline(road.points, 2, "rgba(235,225,184,0.35)", true);
+    const style = routeStyleForRoad(road);
+    drawPolyline(road.points, road.width + style.edgeWidth, style.edge);
+    drawPolyline(road.points, road.width, style.base);
+    drawPolyline(road.points, Math.max(1, road.width * 0.08), style.texture, true, style.textureDash);
+    if (style.center) {
+      drawPolyline(road.points, Math.max(1, road.width * 0.055), style.center, true, [24, 22]);
+    }
   }
 
   function drawPath(path) {
-    drawPolyline(path.points, path.width + 4, "#5f6659");
-    drawPolyline(path.points, path.width, "#b7ad91");
+    const style = routeStyleForPath(path);
+    drawPolyline(path.points, path.width + style.grassWidth, style.grassEdge);
+    drawPolyline(path.points, path.width + style.edgeWidth, style.edge);
+    drawPolyline(path.points, path.width, style.base);
+    drawPolyline(path.points, Math.max(1, path.width * 0.08), style.texture, true, [10, 16]);
+  }
+
+  function routeStyleForRoad(road) {
+    const highway = road.tags?.highway || "";
+    if (highway === "service") {
+      return {
+        edgeWidth: 3,
+        edge: "#222b2b",
+        base: "#3e4646",
+        texture: "rgba(232,222,190,0.11)",
+        textureDash: [8, 18],
+        center: null
+      };
+    }
+
+    if (highway === "tertiary" || highway === "residential") {
+      return {
+        edgeWidth: 4,
+        edge: "#20292b",
+        base: "#434c4d",
+        texture: "rgba(235,225,184,0.13)",
+        textureDash: [12, 20],
+        center: "rgba(238,226,180,0.18)"
+      };
+    }
+
+    return {
+      edgeWidth: 4,
+      edge: "#1f282a",
+      base: "#485052",
+      texture: "rgba(235,225,184,0.15)",
+      textureDash: [14, 20],
+      center: "rgba(238,226,180,0.2)"
+    };
+  }
+
+  function routeStyleForPath(path) {
+    const highway = path.tags?.highway || "";
+    if (highway === "footway" || highway === "path") {
+      return {
+        grassWidth: 6,
+        edgeWidth: 2,
+        grassEdge: "rgba(45,78,47,0.42)",
+        edge: "#716f5f",
+        base: "#afa78a",
+        texture: "rgba(255,244,205,0.12)"
+      };
+    }
+
+    return {
+      grassWidth: 5,
+      edgeWidth: 2,
+      grassEdge: "rgba(45,78,47,0.34)",
+      edge: "#6d715f",
+      base: "#b9b096",
+      texture: "rgba(255,244,205,0.1)"
+    };
   }
 
   function drawBuilding(building) {
     const points = building.coordinates || rectPoints(building);
-    const roofColor = roofColorForBuilding(building);
+    const style = buildingStyle(building);
     const facade = facadeForBuilding(points);
 
-    drawFacadeShadow(facade);
-    drawFacadeWall(facade);
-    drawPolygon(points, roofColor, "rgba(246,234,196,0.48)");
-    drawRoofStripes(points);
-    drawTopHighlight(points);
+    drawRoofShadow(points, style);
+    drawFacadeShadow(facade, style);
+    drawFacadeWall(facade, style);
+    drawPolygon(points, style.roof, style.outline);
+    drawRoofShading(points, style);
+    drawRoofStripes(points, style);
+    drawTopHighlight(points, style);
     drawBuildingDoor(building, facade);
-    drawFacadeWindows(building, facade);
-    drawRoofTrim(points, facade);
+    drawFacadeWindows(building, facade, style);
+    drawRoofTrim(points, facade, style);
 
     if (DEBUG_BUILDINGS && facade) {
       drawDebugFacade(facade);
@@ -573,32 +765,153 @@
   function drawLandmark(landmark) {
     const point = worldToScreen(landmark.x, landmark.y);
     ctx.fillStyle = "#111817";
-    circle(point.x, point.y, 14);
+    circle(point.x, point.y, worldSize(14));
     ctx.strokeStyle = "#f0b86d";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = worldSize(3);
     ctx.stroke();
     ctx.fillStyle = "#f0b86d";
-    circle(point.x, point.y, 5);
+    circle(point.x, point.y, worldSize(5));
   }
 
   function drawPlayer() {
-    const screenPlayer = worldToScreen(player.x, player.y);
-    ctx.fillStyle = "rgba(0,0,0,0.28)";
-    ctx.fillRect(screenPlayer.x - player.w / 2 + 3, screenPlayer.y - player.h / 2 + 4, player.w, player.h);
+    const screenPlayer = worldToScreen(player.visualX, player.visualY);
+    const playerW = worldSize(player.w);
+    const playerH = worldSize(player.h);
+    const bob = player.isMoving ? Math.sin(elapsedTime * 15) * worldSize(0.6) : Math.sin(elapsedTime * 4) * worldSize(0.35);
+    const x = screenPlayer.x;
+    const y = screenPlayer.y + bob;
 
-    ctx.fillStyle = player.color;
-    ctx.fillRect(screenPlayer.x - player.w / 2, screenPlayer.y - player.h / 2, player.w, player.h);
-    ctx.fillStyle = "#394340";
-    ctx.fillRect(screenPlayer.x - player.w / 2 + 3, screenPlayer.y - player.h / 2 + 5, player.w - 6, 5);
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.46)";
+    ctx.beginPath();
+    ctx.ellipse(x + worldSize(2), y + playerH * 0.48, playerW * 0.55, worldSize(4.5), 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#111817";
+    ctx.fillRect(x - playerW / 2 - worldSize(1.5), y - playerH / 2 - worldSize(1.5), playerW + worldSize(3), playerH + worldSize(3));
+    ctx.fillStyle = "#fff0cf";
+    ctx.fillRect(x - playerW / 2, y - playerH / 2, playerW, playerH);
+    ctx.fillStyle = "#263b45";
+    ctx.fillRect(x - playerW / 2 + worldSize(2), y - playerH / 2 + worldSize(4), playerW - worldSize(4), worldSize(6));
+    ctx.fillStyle = "#161f22";
+    ctx.fillRect(x - playerW / 2 + worldSize(3), y - playerH / 2 + worldSize(2), playerW - worldSize(6), worldSize(2));
+    ctx.fillStyle = "#f0b86d";
+    ctx.fillRect(x - worldSize(2), y - playerH / 2 + worldSize(11), worldSize(4), worldSize(3));
+    ctx.restore();
 
     if (DEBUG_BUILDINGS) {
       const feet = worldToScreen(playerFeet().x, playerFeet().y);
       ctx.strokeStyle = "rgba(255,210,70,0.8)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(feet.x, feet.y, PLAYER_COLLISION_RADIUS, 0, Math.PI * 2);
+      ctx.arc(feet.x, feet.y, worldSize(PLAYER_COLLISION_RADIUS), 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  function drawMinimap() {
+    if (!showMinimap || !map) return;
+
+    const panelX = canvas.width - MINIMAP_WIDTH - 16;
+    const panelY = 16;
+    const scale = Math.min(
+      (MINIMAP_WIDTH - MINIMAP_PADDING * 2) / map.world.width,
+      (MINIMAP_HEIGHT - MINIMAP_PADDING * 2) / map.world.height
+    );
+    const mapW = map.world.width * scale;
+    const mapH = map.world.height * scale;
+    const mapX = panelX + (MINIMAP_WIDTH - mapW) / 2;
+    const mapY = panelY + (MINIMAP_HEIGHT - mapH) / 2;
+    const miniState = { mapX, mapY, scale };
+
+    ctx.save();
+    ctx.fillStyle = "rgba(10,15,13,0.76)";
+    ctx.fillRect(panelX, panelY, MINIMAP_WIDTH, MINIMAP_HEIGHT);
+    ctx.strokeStyle = "rgba(239,202,132,0.34)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(panelX + 0.5, panelY + 0.5, MINIMAP_WIDTH - 1, MINIMAP_HEIGHT - 1);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(panelX + 1, panelY + 1, MINIMAP_WIDTH - 2, MINIMAP_HEIGHT - 2);
+    ctx.clip();
+
+    map.roads.forEach((road) => drawMiniRoute(road, miniState, "rgba(106,118,116,0.58)", 0.8));
+    map.paths.forEach((path) => drawMiniRoute(path, miniState, "rgba(211,200,166,0.48)", 0.55));
+    map.parks.forEach((park) => drawMiniPolygon(park.coordinates || rectPoints(park), miniState, "rgba(80,131,76,0.5)"));
+    map.water.forEach((water) => drawMiniPolygon(water.coordinates || rectPoints(water), miniState, "rgba(70,118,138,0.66)"));
+    map.buildings.forEach((building) => drawMiniPolygon(building.coordinates || rectPoints(building), miniState, "rgba(193,104,57,0.64)"));
+
+    const viewport = {
+      x: mapX + camera.x * scale,
+      y: mapY + camera.y * scale,
+      w: visibleWorldWidth() * scale,
+      h: visibleWorldHeight() * scale
+    };
+    ctx.strokeStyle = "rgba(255,238,184,0.95)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(viewport.x, viewport.y, viewport.w, viewport.h);
+
+    const playerMini = miniPoint(player.x, player.y, miniState);
+    ctx.strokeStyle = "#111817";
+    ctx.lineWidth = 2;
+    ctx.fillStyle = "#f7ead2";
+    circle(playerMini.x, playerMini.y, 4.5);
+    ctx.stroke();
+    ctx.fillStyle = "#f0b86d";
+    circle(playerMini.x, playerMini.y, 2);
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(245,234,210,0.9)";
+    ctx.font = "700 10px Inter, ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("M", panelX + 7, panelY + 6);
+    ctx.restore();
+  }
+
+  function drawMiniRoute(route, miniState, color, width) {
+    const points = route.points || [];
+    if (points.length < 2) return;
+
+    const first = miniPoint(points[0].x, points[0].y, miniState);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < points.length; i += 1) {
+      const p = miniPoint(points[i].x, points[i].y, miniState);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMiniPolygon(points, miniState, fillStyle) {
+    if (!points || points.length < 3) return;
+
+    const first = miniPoint(points[0].x, points[0].y, miniState);
+    ctx.save();
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < points.length; i += 1) {
+      const p = miniPoint(points[i].x, points[i].y, miniState);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function miniPoint(x, y, miniState) {
+    return {
+      x: miniState.mapX + x * miniState.scale,
+      y: miniState.mapY + y * miniState.scale
+    };
   }
 
   function roofColorForBuilding(building) {
@@ -609,47 +922,86 @@
     return "#3a2c25";
   }
 
-  function drawRoofStripes(points) {
+  function buildingStyle(building) {
+    const seed = seededUnit(building.id || building.name || "building");
+    const roof = adjustHexColor(roofColorForBuilding(building), Math.round(seed * 18 - 8));
+    const text = `${building.name || ""} ${building.tags?.building || ""}`.toLowerCase();
+    const isLandmark = Boolean(building.label) || /center|science|auditorium|gym|fitness|library|university/.test(text);
+    const facadeBase = text.includes("residence") || text.includes("hall") ? "#b9875f" : "#c39a66";
+
+    return {
+      roof,
+      roofStripe: seed > 0.5 ? "rgba(229,117,62,0.58)" : "rgba(196,89,51,0.5)",
+      roofStripeAlt: "rgba(255,199,124,0.2)",
+      roofShade: seed > 0.5 ? "rgba(33,19,14,0.18)" : "rgba(255,210,142,0.08)",
+      facade: adjustHexColor(facadeBase, Math.round(seed * 18 - 9)),
+      facadeLine: "rgba(255,237,190,0.18)",
+      trim: isLandmark ? "rgba(255,219,139,0.62)" : "rgba(245,197,121,0.44)",
+      bottomTrim: "rgba(55,31,22,0.68)",
+      outline: isLandmark ? "rgba(255,232,176,0.58)" : "rgba(91,45,28,0.68)",
+      shadow: seed > 0.6 ? "rgba(0,0,0,0.26)" : "rgba(0,0,0,0.2)",
+      window: seed > 0.45 ? "#1c1513" : "#242016",
+      windowTrim: "rgba(255,226,160,0.38)",
+      windowSpacing: isLandmark ? 27 : seed > 0.5 ? 35 : 42,
+      columnEvery: isLandmark ? 3 : 0
+    };
+  }
+
+  function drawRoofShadow(points, style) {
+    drawPolygon(offsetPoints(points, 3, 4), style.shadow);
+  }
+
+  function drawRoofShading(points, style) {
+    const bounds = boundsFromPoints(points);
+    ctx.save();
+    clipToPolygon(points);
+    ctx.fillStyle = style.roofShade;
+    const first = worldToScreen(bounds.x, bounds.y + bounds.h * 0.58);
+    ctx.fillRect(first.x, first.y, worldSize(bounds.w), worldSize(bounds.h * 0.42));
+    ctx.restore();
+  }
+
+  function drawRoofStripes(points, style) {
     const bounds = boundsFromPoints(points);
     const screenStart = worldToScreen(bounds.x - bounds.h, bounds.y);
     const screenEnd = worldToScreen(bounds.x + bounds.w + bounds.h, bounds.y + bounds.h);
 
     ctx.save();
     clipToPolygon(points);
-    ctx.strokeStyle = "rgba(224,102,55,0.42)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = style.roofStripe;
+    ctx.lineWidth = worldSize(1);
 
-    for (let y = screenStart.y - bounds.w; y < screenEnd.y + bounds.w; y += BUILDING_ROOF_STRIPE_SPACING) {
+    for (let y = screenStart.y - worldSize(bounds.w); y < screenEnd.y + worldSize(bounds.w); y += worldSize(BUILDING_ROOF_STRIPE_SPACING)) {
       ctx.beginPath();
-      ctx.moveTo(screenStart.x - 40, y);
-      ctx.lineTo(screenEnd.x + 40, y + bounds.w * 0.12);
+      ctx.moveTo(screenStart.x - worldSize(40), y);
+      ctx.lineTo(screenEnd.x + worldSize(40), y + worldSize(bounds.w * 0.12));
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "rgba(255,196,123,0.16)";
-    for (let y = screenStart.y - bounds.w + BUILDING_ROOF_STRIPE_SPACING / 2; y < screenEnd.y + bounds.w; y += BUILDING_ROOF_STRIPE_SPACING * 2) {
+    ctx.strokeStyle = style.roofStripeAlt;
+    for (let y = screenStart.y - worldSize(bounds.w) + worldSize(BUILDING_ROOF_STRIPE_SPACING / 2); y < screenEnd.y + worldSize(bounds.w); y += worldSize(BUILDING_ROOF_STRIPE_SPACING * 2)) {
       ctx.beginPath();
-      ctx.moveTo(screenStart.x - 40, y);
-      ctx.lineTo(screenEnd.x + 40, y + bounds.w * 0.12);
+      ctx.moveTo(screenStart.x - worldSize(40), y);
+      ctx.lineTo(screenEnd.x + worldSize(40), y + worldSize(bounds.w * 0.12));
       ctx.stroke();
     }
     ctx.restore();
   }
 
-  function drawTopHighlight(points) {
+  function drawTopHighlight(points, style) {
     const edges = directionalEdges(points, "top");
     ctx.save();
-    ctx.strokeStyle = "rgba(255,229,174,0.36)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = style.trim;
+    ctx.lineWidth = worldSize(2);
     ctx.lineCap = "round";
     edges.forEach((edge) => drawWorldSegment(edge.a, edge.b));
     ctx.restore();
   }
 
-  function drawRoofTrim(points, facade) {
+  function drawRoofTrim(points, facade, style) {
     ctx.save();
-    ctx.strokeStyle = "rgba(106,49,28,0.78)";
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = style.bottomTrim;
+    ctx.lineWidth = worldSize(3);
     ctx.lineCap = "round";
     if (facade) {
       drawWorldSegment(facade.edge.a, facade.edge.b);
@@ -659,23 +1011,23 @@
     ctx.restore();
   }
 
-  function drawFacadeShadow(facade) {
+  function drawFacadeShadow(facade, style) {
     if (!facade) return;
 
     drawPolygon(
-      offsetPoints(facade.polygon, 4, BUILDING_SHADOW_DEPTH),
-      "rgba(0,0,0,0.30)"
+      offsetPoints(facade.polygon, 3, BUILDING_SHADOW_DEPTH),
+      style.shadow
     );
   }
 
-  function drawFacadeWall(facade) {
+  function drawFacadeWall(facade, style) {
     if (!facade) return;
 
-    drawPolygon(facade.polygon, "#d1aa70", "rgba(80,44,27,0.45)");
+    drawPolygon(facade.polygon, style.facade, "rgba(65,39,25,0.58)");
 
     ctx.save();
-    ctx.strokeStyle = "rgba(255,238,184,0.26)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = style.facadeLine;
+    ctx.lineWidth = worldSize(1);
     for (let i = 1; i <= 3; i += 1) {
       const t = i / 4;
       drawWorldSegment(
@@ -683,28 +1035,46 @@
         lerpPoint(facade.topB, facade.bottomB, t)
       );
     }
+    if (style.columnEvery && facade.length > 82) {
+      ctx.strokeStyle = "rgba(255,234,185,0.24)";
+      ctx.lineWidth = worldSize(1.5);
+      const columns = Math.min(6, Math.floor(facade.length / 52));
+      for (let i = 1; i <= columns; i += 1) {
+        const t = i / (columns + 1);
+        drawWorldSegment(facadePoint(facade, t, 0.16), facadePoint(facade, t, 0.92));
+      }
+    }
+
+    ctx.strokeStyle = style.trim;
+    ctx.lineWidth = worldSize(1.5);
+    drawWorldSegment(facade.topA, facade.topB);
+    ctx.strokeStyle = style.bottomTrim;
+    ctx.lineWidth = worldSize(2);
+    drawWorldSegment(facade.bottomA, facade.bottomB);
     ctx.restore();
   }
 
-  function drawFacadeWindows(building, facade) {
-    if (!facade || facade.length < 36) return;
+  function drawFacadeWindows(building, facade, style) {
+    if (!facade || facade.length < 44) return;
 
-    const count = Math.min(10, Math.max(1, Math.floor(facade.length / 38)));
+    const count = Math.min(18, Math.max(1, Math.floor(facade.length / style.windowSpacing)));
     const fallbackDoorT = building.useFallbackDoor ? building.fallbackDoorT : null;
 
     ctx.save();
-    ctx.fillStyle = "#231515";
-    ctx.strokeStyle = "rgba(255,226,160,0.44)";
-    ctx.lineWidth = 1;
+    ctx.fillStyle = style.window;
+    ctx.strokeStyle = style.windowTrim;
+    ctx.lineWidth = worldSize(1);
+    const windowW = worldSize(WINDOW_WIDTH);
+    const windowH = worldSize(WINDOW_HEIGHT);
 
     for (let i = 1; i <= count; i += 1) {
       const t = i / (count + 1);
-      if (fallbackDoorT !== null && Math.abs(t - fallbackDoorT) < 0.13) continue;
+      if (fallbackDoorT !== null && Math.abs(t - fallbackDoorT) < 0.11) continue;
 
-      const center = facadePoint(facade, t, 0.5);
+      const center = facadePoint(facade, t, facade.depth > 15 ? 0.48 : 0.54);
       const p = worldToScreen(center.x, center.y);
-      ctx.fillRect(p.x - WINDOW_WIDTH / 2, p.y - WINDOW_HEIGHT / 2, WINDOW_WIDTH, WINDOW_HEIGHT);
-      ctx.strokeRect(p.x - WINDOW_WIDTH / 2, p.y - WINDOW_HEIGHT / 2, WINDOW_WIDTH, WINDOW_HEIGHT);
+      ctx.fillRect(p.x - windowW / 2, p.y - windowH / 2, windowW, windowH);
+      ctx.strokeRect(p.x - windowW / 2, p.y - windowH / 2, windowW, windowH);
     }
 
     ctx.restore();
@@ -715,18 +1085,21 @@
     if (!center) return;
 
     const p = worldToScreen(center.x, center.y);
+    const isRealEntrance = building.realEntrances && building.realEntrances.length > 0;
+    const doorW = worldSize(isRealEntrance ? DOOR_WIDTH : DOOR_WIDTH * 0.86);
+    const doorH = worldSize(isRealEntrance ? DOOR_HEIGHT : DOOR_HEIGHT * 0.9);
 
     ctx.save();
-    ctx.fillStyle = "#0b0706";
-    ctx.fillRect(p.x - DOOR_WIDTH / 2, p.y - DOOR_HEIGHT / 2, DOOR_WIDTH, DOOR_HEIGHT);
-    ctx.strokeStyle = "rgba(255,205,138,0.44)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(p.x - DOOR_WIDTH / 2, p.y - DOOR_HEIGHT / 2, DOOR_WIDTH, DOOR_HEIGHT);
+    ctx.fillStyle = isRealEntrance ? "#0b0706" : "#18100e";
+    ctx.fillRect(p.x - doorW / 2, p.y - doorH / 2, doorW, doorH);
+    ctx.strokeStyle = isRealEntrance ? "rgba(255,214,152,0.5)" : "rgba(255,205,138,0.32)";
+    ctx.lineWidth = worldSize(1);
+    ctx.strokeRect(p.x - doorW / 2, p.y - doorH / 2, doorW, doorH);
 
     if (DEBUG_DOORS) {
       ctx.strokeStyle = building.realEntrances?.length ? "rgba(116,220,255,0.9)" : "rgba(255,210,80,0.9)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(p.x - DOOR_WIDTH / 2 - 3, p.y - DOOR_HEIGHT / 2 - 3, DOOR_WIDTH + 6, DOOR_HEIGHT + 6);
+      ctx.lineWidth = worldSize(2);
+      ctx.strokeRect(p.x - doorW / 2 - worldSize(3), p.y - doorH / 2 - worldSize(3), doorW + worldSize(6), doorH + worldSize(6));
     }
 
     ctx.restore();
@@ -754,22 +1127,58 @@
     const labelX = bounds.x + bounds.w / 2;
     const labelY = bounds.h >= 42 ? bounds.y + Math.min(24, bounds.h * 0.35) : bounds.y - 10;
     const p = worldToScreen(labelX, labelY);
-    const text = building.label;
+    const playerScreen = worldToScreen(player.visualX, player.visualY);
 
     ctx.save();
-    ctx.font = "700 11px Inter, ui-sans-serif, system-ui, sans-serif";
+    ctx.font = "700 10px Inter, ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const width = Math.min(220, ctx.measureText(text).width + 14);
-    const height = 18;
-    ctx.fillStyle = "rgba(12,16,15,0.82)";
-    ctx.fillRect(p.x - width / 2, p.y - height / 2, width, height);
-    ctx.strokeStyle = "rgba(240,184,109,0.34)";
+    const text = ellipsizeText(building.label, 188);
+    const width = Math.min(198, ctx.measureText(text).width + 10);
+    const height = 15;
+    const labelRect = {
+      x: p.x - width / 2,
+      y: p.y - height / 2,
+      w: width,
+      h: height
+    };
+
+    if (pointInScreenRect(playerScreen, labelRect, worldSize(10))) {
+      ctx.restore();
+      return;
+    }
+
+    ctx.shadowColor = "rgba(0,0,0,0.55)";
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 1;
+    ctx.fillStyle = "rgba(13,18,16,0.54)";
+    ctx.fillRect(labelRect.x, labelRect.y, labelRect.w, labelRect.h);
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(244,216,160,0.16)";
     ctx.lineWidth = 1;
-    ctx.strokeRect(p.x - width / 2, p.y - height / 2, width, height);
-    ctx.fillStyle = "#f5ead2";
-    ctx.fillText(text.length > 34 ? `${text.slice(0, 31)}...` : text, p.x, p.y + 0.5, width - 8);
+    ctx.strokeRect(labelRect.x, labelRect.y, labelRect.w, labelRect.h);
+    ctx.fillStyle = "rgba(247,235,205,0.9)";
+    ctx.fillText(text, p.x, p.y + 0.5, width - 8);
     ctx.restore();
+  }
+
+  function ellipsizeText(text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) {
+      return text;
+    }
+
+    let result = text;
+    while (result.length > 4 && ctx.measureText(`${result}...`).width > maxWidth) {
+      result = result.slice(0, -1);
+    }
+    return `${result.trimEnd()}...`;
+  }
+
+  function pointInScreenRect(point, rect, padding = 0) {
+    return point.x >= rect.x - padding &&
+      point.x <= rect.x + rect.w + padding &&
+      point.y >= rect.y - padding &&
+      point.y <= rect.y + rect.h + padding;
   }
 
   function drawEntranceDebug(entrance) {
@@ -777,9 +1186,9 @@
 
     ctx.save();
     ctx.fillStyle = "rgba(116,220,255,0.78)";
-    circle(p.x, p.y, 4);
+    circle(p.x, p.y, worldSize(4));
     ctx.strokeStyle = "rgba(7,20,28,0.8)";
-    ctx.lineWidth = 1;
+    ctx.lineWidth = worldSize(1);
     ctx.stroke();
     ctx.restore();
   }
@@ -789,10 +1198,10 @@
     const p = worldToScreen(door.x, door.y);
     ctx.save();
     ctx.strokeStyle = "rgba(255,230,80,0.9)";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = worldSize(2);
     drawPolygon(facade.polygon, "rgba(255,230,80,0.10)", "rgba(255,230,80,0.8)");
     ctx.fillStyle = "rgba(255,230,80,0.9)";
-    circle(p.x, p.y, 3);
+    circle(p.x, p.y, worldSize(3));
     ctx.restore();
   }
 
@@ -839,7 +1248,7 @@
 
   function wallDepthForBuilding(points) {
     const bounds = boundsFromPoints(points);
-    return Math.max(12, Math.min(24, Math.round(Math.min(bounds.w, bounds.h) * 0.16) || BUILDING_WALL_DEPTH));
+    return Math.max(10, Math.min(20, Math.round(Math.min(bounds.w, bounds.h) * 0.13) || BUILDING_WALL_DEPTH));
   }
 
   function southFacadeEdgeForBuilding(points) {
@@ -977,7 +1386,7 @@
     ctx.save();
     ctx.fillStyle = fillStyle;
     ctx.strokeStyle = strokeStyle || "transparent";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = worldSize(2);
     ctx.beginPath();
     ctx.moveTo(first.x, first.y);
     for (let i = 1; i < points.length; i += 1) {
@@ -1173,6 +1582,33 @@
 
   function distance(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function seededUnit(seed) {
+    const text = String(seed);
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return ((hash >>> 0) % 10000) / 10000;
+  }
+
+  function adjustHexColor(hex, amount) {
+    const normalized = hex.replace("#", "");
+    const number = Number.parseInt(normalized, 16);
+    const r = clamp(((number >> 16) & 255) + amount, 0, 255);
+    const g = clamp(((number >> 8) & 255) + amount, 0, 255);
+    const b = clamp((number & 255) + amount, 0, 255);
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+
+  function toHex(value) {
+    return Math.round(value).toString(16).padStart(2, "0");
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(value, max));
   }
 
   function setText(element, text) {
